@@ -1,0 +1,8 @@
+# STT + TTS Voice Server dependencies
+numpy<2
+faster-whisper
+soundfile
+supertonic
+fastapi
+uvicorn
+python-multipart

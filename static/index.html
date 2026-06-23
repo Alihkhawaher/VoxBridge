@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoxBridge — STT + TTS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f23;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 30px 20px;
+        }
+        .wrapper { max-width: 700px; margin: 0 auto; }
+        h1 { text-align: center; font-size: 1.6rem; margin-bottom: 4px; color: #fff; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 24px; font-size: 0.85rem; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 0; margin-bottom: 20px; }
+        .tab {
+            flex: 1; padding: 12px; text-align: center; cursor: pointer;
+            background: #1a1a2e; border: 1px solid #333; color: #888;
+            font-weight: 600; font-size: 0.95rem; transition: all 0.2s;
+        }
+        .tab:first-child { border-radius: 8px 0 0 8px; }
+        .tab:last-child { border-radius: 0 8px 8px 0; }
+        .tab.active { background: #2a2a4e; color: #fff; border-color: #5dade2; }
+        .tab:hover:not(.active) { background: #222; }
+        .panel { display: none; }
+        .panel.active { display: block; }
+
+        /* Common */
+        .card {
+            background: #1a1a2e; border: 1px solid #333; border-radius: 12px;
+            padding: 20px; margin-bottom: 16px;
+        }
+        .status {
+            text-align: center; padding: 10px; border-radius: 8px;
+            margin-bottom: 16px; font-size: 0.85rem;
+        }
+        .status.info { background: #1a3a5c; color: #5dade2; }
+        .status.success { background: #1a4a2a; color: #58d68d; }
+        .status.error { background: #4a1a1a; color: #e74c3c; }
+        .status.processing { background: #3a3a1a; color: #f4d03f; }
+        .status.warning { background: #3a3a1a; color: #f39c12; }
+        button {
+            padding: 10px 24px; border: none; border-radius: 8px;
+            font-size: 0.95rem; cursor: pointer; font-weight: 600;
+            transition: all 0.2s;
+        }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        label { display: block; font-size: 0.8rem; color: #aaa; margin-bottom: 4px; }
+        select, input[type="text"], textarea {
+            width: 100%; padding: 8px 12px; border: 1px solid #333;
+            border-radius: 6px; background: #0f0f23; color: #e0e0e0;
+            font-size: 0.9rem; margin-bottom: 12px;
+        }
+        textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+
+        /* STT */
+        .visualizer { width: 100%; height: 60px; background: #111; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+        canvas { width: 100%; height: 100%; display: block; }
+        .timer { text-align: center; font-size: 1.8rem; font-family: monospace; color: #e74c3c; margin-bottom: 12px; min-height: 36px; }
+        .controls { display: flex; gap: 10px; justify-content: center; margin-bottom: 16px; }
+        #recordBtn { background: #e74c3c; color: #fff; }
+        #recordBtn.recording { background: #c0392b; animation: pulse 1s infinite; }
+        #stopBtn { background: #555; color: #fff; }
+        @keyframes pulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(231,76,60,.4); }
+            50% { box-shadow: 0 0 0 12px rgba(231,76,60,0); }
+        }
+        .result-text { font-size: 1.2rem; line-height: 1.6; color: #fff; min-height: 30px; }
+        .result-meta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 0.8rem; color: #888; }
+        .result-meta span { background: #222; padding: 3px 8px; border-radius: 4px; }
+        .segment { padding: 4px 0; border-bottom: 1px solid #222; font-size: 0.85rem; }
+        .segment-time { color: #5dade2; font-family: monospace; font-size: 0.75rem; }
+
+        /* TTS */
+        #ttsBtn { background: #27ae60; color: #fff; }
+        #ttsBtn:hover:not(:disabled) { background: #2ecc71; }
+        #ttsBtn.loading { background: #7dcea0; }
+        .audio-player { width: 100%; margin-top: 12px; }
+        .tts-status-bar { display: flex; justify-content: space-between; font-size: 0.8rem; color: #666; margin-top: 6px; }
+
+        /* History */
+        .history h2 { font-size: 0.9rem; color: #666; margin-bottom: 8px; }
+        .history-item {
+            background: #1a1a2e; border: 1px solid #222; border-radius: 6px;
+            padding: 10px; margin-bottom: 6px;
+        }
+        .history-item .text { color: #ccc; font-size: 0.9rem; }
+        .history-item .meta { font-size: 0.75rem; color: #555; margin-top: 3px; }
+
+        /* Compatibility warning */
+        .compat-warning {
+            background: #3a2a1a; border: 1px solid #f39c12; border-radius: 8px;
+            padding: 12px 16px; margin-bottom: 16px; font-size: 0.85rem; color: #f39c12;
+        }
+    </style>
+</head>
+<body>
+<div class="wrapper">
+    <h1>🎙️ VoxBridge</h1>
+    <p class="subtitle">Speech-to-Text + Text-to-Speech</p>
+
+    <!-- Connection info -->
+    <div class="card" style="margin-bottom:16px;padding:14px;font-size:0.82rem;">
+        <strong style="color:#5dade2;">📡 How to Connect</strong>
+        <div id="connectionInfo" style="margin-top:8px;color:#aaa;line-height:1.6;">
+            <!-- Populated dynamically from /api/info -->
+        </div>
+    </div>
+
+    <!-- Compatibility warning (hidden by default) -->
+    <div id="compatWarning" class="compat-warning" style="display:none;"></div>
+
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('stt')">🎤 Speech → Text</div>
+        <div class="tab" onclick="switchTab('tts')">🔊 Text → Speech</div>
+    </div>
+
+    <!-- ═══ STT Panel ═══ -->
+    <div id="stt-panel" class="panel active">
+        <div class="visualizer"><canvas id="visualizer"></canvas></div>
+        <div class="timer" id="timer"></div>
+        <div class="controls">
+            <button id="recordBtn" onclick="startRecording()">⏺ Record</button>
+            <button id="stopBtn" onclick="stopRecording()" disabled>⏹ Stop</button>
+        </div>
+        <div id="sttStatus" class="status info">Ready — click Record</div>
+        <div class="card" id="sttResult" style="display:none">
+            <div class="result-text" id="sttText"></div>
+            <div class="result-meta" id="sttMeta"></div>
+            <div id="sttSegments"></div>
+        </div>
+        <div class="history" id="sttHistory"></div>
+    </div>
+
+    <!-- ═══ TTS Panel ═══ -->
+    <div id="tts-panel" class="panel">
+        <div class="card">
+            <label for="ttsText">Text to speak</label>
+            <textarea id="ttsText" placeholder="Type text here... Arabic or English">السلام عليكم ورحمة الله وبركاته</textarea>
+
+            <div style="display:flex;gap:12px;margin-bottom:12px">
+                <div style="flex:1">
+                    <label for="ttsVoice">Voice</label>
+                    <select id="ttsVoice">
+                        <option value="M1">M1 (Male 1)</option>
+                        <option value="M2">M2 (Male 2)</option>
+                        <option value="M3">M3 (Male 3)</option>
+                        <option value="M4">M4 (Male 4)</option>
+                        <option value="M5">M5 (Male 5)</option>
+                        <option value="F1">F1 (Female 1)</option>
+                        <option value="F2">F2 (Female 2)</option>
+                        <option value="F3">F3 (Female 3)</option>
+                        <option value="F4">F4 (Female 4)</option>
+                        <option value="F5">F5 (Female 5)</option>
+                    </select>
+                </div>
+                <div style="flex:1">
+                    <label for="ttsSpeed">Speed</label>
+                    <select id="ttsSpeed">
+                        <option value="0.8">0.8x Slow</option>
+                        <option value="0.9">0.9x</option>
+                        <option value="1.0" selected>1.0x Normal</option>
+                        <option value="1.1">1.1x</option>
+                        <option value="1.2">1.2x Fast</option>
+                    </select>
+                </div>
+            </div>
+
+            <button id="ttsBtn" onclick="synthesize()" style="width:100%">🔊 Generate Speech</button>
+
+            <div id="ttsStatus" class="status info" style="margin-top:12px">Enter text and click Generate</div>
+            <audio id="ttsAudio" class="audio-player" controls style="display:none"></audio>
+            <div class="tts-status-bar" id="ttsInfo" style="display:none"></div>
+        </div>
+        <div class="history" id="ttsHistory"></div>
+    </div>
+</div>
+
+<script>
+// ── Safe DOM helpers (prevents XSS) ───────────────────────────
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ── Connection info (dynamic, not hardcoded) ──────────────────
+(async function loadConnectionInfo() {
+    const el = document.getElementById('connectionInfo');
+    try {
+        const r = await fetch('/api/info');
+        if (!r.ok) throw new Error('Failed to fetch');
+        const info = await r.json();
+        const host = info.server?.host || location.hostname;
+        const port = info.server?.port || location.port || '7790';
+        const baseUrl = `http://${host}:${port}`;
+        const voices = info.tts?.voices?.join(', ') || 'M1-M5, F1-F5';
+
+        el.innerHTML = `
+            <div><strong>Web UI:</strong> <code style="background:#222;padding:2px 6px;border-radius:3px;">${escapeHtml(baseUrl)}/</code></div>
+            <div style="margin-top:6px;"><strong>TTS API:</strong> <code style="background:#222;padding:2px 6px;border-radius:3px;">POST ${escapeHtml(baseUrl)}/v1/audio/speech</code></div>
+            <div><strong>STT API:</strong> <code style="background:#222;padding:2px 6px;border-radius:3px;">POST ${escapeHtml(baseUrl)}/v1/audio/transcriptions</code></div>
+            <div><strong>API Docs:</strong> <a href="/docs" style="color:#5dade2;">${escapeHtml(baseUrl)}/docs</a></div>
+        `;
+    } catch (e) {
+        // Fallback to current location if /api/info fails
+        const baseUrl = `${location.protocol}//${location.host}`;
+        el.innerHTML = `
+            <div><strong>Web UI:</strong> <code style="background:#222;padding:2px 6px;border-radius:3px;">${escapeHtml(baseUrl)}/</code></div>
+            <div><strong>API Docs:</strong> <a href="/docs" style="color:#5dade2;">${escapeHtml(baseUrl)}/docs</a></div>
+            <div style="color:#888;margin-top:4px;">Could not load full server info. Open /docs for API details.</div>
+        `;
+    }
+})();
+
+// ── Browser compatibility check ───────────────────────────────
+(function checkCompatibility() {
+    const warnings = [];
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        warnings.push('🎙️ Microphone access (getUserMedia) is not supported in this browser. STT recording will not work.');
+    }
+    if (typeof MediaRecorder === 'undefined') {
+        warnings.push('🔴 MediaRecorder API is not available. STT recording will not work. Try Chrome, Edge, or Firefox.');
+    } else if (!MediaRecorder.isTypeSupported || !MediaRecorder.isTypeSupported('audio/webm')) {
+        warnings.push('⚠️ audio/webm recording is not supported. Audio may be recorded in a different format. For best results, use Chrome or Edge.');
+    }
+    if (warnings.length > 0) {
+        const el = document.getElementById('compatWarning');
+        el.style.display = 'block';
+        el.innerHTML = warnings.map(w => '<div>' + escapeHtml(w) + '</div>').join('');
+    }
+})();
+
+// ── Tab switching ─────────────────────────────────────────────
+function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach((t,i) => {
+        t.classList.toggle('active', (tab === 'stt' ? 0 : 1) === i);
+    });
+    document.getElementById('stt-panel').classList.toggle('active', tab === 'stt');
+    document.getElementById('tts-panel').classList.toggle('active', tab === 'tts');
+}
+
+// ── STT ───────────────────────────────────────────────────────
+let mediaRecorder, audioChunks = [], stream;
+let startTime, timerInterval, analyser, animId;
+let audioCtx = null;
+let prevBlobUrl = null;
+const sttHistory = [];
+
+const recordBtn = document.getElementById('recordBtn');
+const stopBtn = document.getElementById('stopBtn');
+const canvas = document.getElementById('visualizer');
+const ctx = canvas.getContext('2d');
+clearCanvas();
+
+function setSttStatus(msg, type) {
+    const el = document.getElementById('sttStatus');
+    el.textContent = msg;
+    el.className = 'status ' + type;
+}
+
+async function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setSttStatus('Microphone not supported in this browser. Use Chrome, Edge, or Firefox.', 'error');
+        return;
+    }
+    if (typeof MediaRecorder === 'undefined') {
+        setSttStatus('MediaRecorder not supported in this browser. Use Chrome, Edge, or Firefox.', 'error');
+        return;
+    }
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (audioCtx) { try { audioCtx.close(); } catch(e) {} }
+        audioCtx = new AudioContext();
+        const src = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        src.connect(analyser);
+        drawVis();
+
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+        mediaRecorder.onstop = async () => {
+            const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+            stream.getTracks().forEach(t => t.stop());
+            cancelAnimationFrame(animId);
+            clearCanvas();
+            await transcribe(blob);
+        };
+        mediaRecorder.start();
+        recordBtn.classList.add('recording');
+        recordBtn.disabled = true;
+        stopBtn.disabled = false;
+        startTime = Date.now();
+        timerInterval = setInterval(() => {
+            const s = Math.floor((Date.now() - startTime) / 1000);
+            document.getElementById('timer').textContent =
+                `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+        }, 200);
+        setSttStatus('Recording... speak in Arabic or English', 'info');
+    } catch (err) {
+        setSttStatus('Microphone error: ' + err.message, 'error');
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    recordBtn.classList.remove('recording');
+    recordBtn.disabled = false;
+    stopBtn.disabled = true;
+    clearInterval(timerInterval);
+    document.getElementById('timer').textContent = '';
+    setSttStatus('Transcribing...', 'processing');
+}
+
+async function transcribe(blob) {
+    const fd = new FormData();
+    fd.append('file', blob, 'recording.webm');
+    try {
+        const r = await fetch('/v1/audio/transcriptions', { method: 'POST', body: fd });
+        if (!r.ok) throw new Error((await r.json()).detail || 'Server error');
+        const d = await r.json();
+
+        document.getElementById('sttResult').style.display = 'block';
+        const txt = d.text || '(no speech)';
+        const sttTextEl = document.getElementById('sttText');
+        sttTextEl.textContent = txt;
+        sttTextEl.style.direction = isArabic(txt) ? 'rtl' : 'ltr';
+
+        // Build meta safely with DOM methods
+        const metaEl = document.getElementById('sttMeta');
+        metaEl.innerHTML = '';
+        [
+            '🌐 ' + String(d.language),
+            '📊 ' + ((d.language_probability*100).toFixed(1)) + '%',
+            '⏱ ' + String(d.duration) + 's',
+            '⚡ ' + String(d.processing_time) + 's'
+        ].forEach(text => {
+            const span = document.createElement('span');
+            span.textContent = text;
+            metaEl.appendChild(span);
+        });
+
+        // Build segments safely
+        const segContainer = document.getElementById('sttSegments');
+        segContainer.innerHTML = '';
+        (d.segments || []).forEach(s => {
+            const div = document.createElement('div');
+            div.className = 'segment';
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'segment-time';
+            timeSpan.textContent = `[${s.start}s→${s.end}s]`;
+            div.appendChild(timeSpan);
+            div.appendChild(document.createTextNode(' ' + s.text));
+            segContainer.appendChild(div);
+        });
+
+        sttHistory.unshift({ text: txt, lang: d.language, time: new Date().toLocaleTimeString() });
+        if (sttHistory.length > 10) sttHistory.pop();
+        renderSttHistory();
+        setSttStatus('Transcription complete!', 'success');
+    } catch (err) {
+        setSttStatus('Error: ' + err.message, 'error');
+    }
+}
+
+function renderSttHistory() {
+    const el = document.getElementById('sttHistory');
+    el.innerHTML = '';
+    const h2 = document.createElement('h2');
+    h2.textContent = 'History';
+    el.appendChild(h2);
+
+    sttHistory.forEach(h => {
+        const item = document.createElement('div');
+        item.className = 'history-item';
+
+        const textDiv = document.createElement('div');
+        textDiv.className = 'text';
+        textDiv.style.direction = isArabic(h.text) ? 'rtl' : 'ltr';
+        textDiv.textContent = h.text;
+
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'meta';
+        metaDiv.textContent = '🌐 ' + h.lang + ' · ' + h.time;
+
+        item.appendChild(textDiv);
+        item.appendChild(metaDiv);
+        el.appendChild(item);
+    });
+}
+
+function isArabic(t) { return /[\u0600-\u06FF]/.test(t); }
+
+function drawVis() {
+    canvas.width = canvas.offsetWidth * 2;
+    canvas.height = canvas.offsetHeight * 2;
+    const buf = analyser.frequencyBinCount;
+    const data = new Uint8Array(buf);
+    (function draw() {
+        animId = requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(data);
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const bw = (canvas.width / buf) * 2.5;
+        let x = 0;
+        for (let i = 0; i < buf; i++) {
+            const h = (data[i] / 255) * canvas.height * 0.8;
+            ctx.fillStyle = `hsl(${(i/buf)*120+200},70%,50%)`;
+            ctx.fillRect(x, canvas.height - h, bw, h);
+            x += bw + 1;
+        }
+    })();
+}
+
+function clearCanvas() {
+    canvas.width = canvas.offsetWidth * 2;
+    canvas.height = canvas.offsetHeight * 2;
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// ── TTS ───────────────────────────────────────────────────────
+const ttsHistory = [];
+
+function setTtsStatus(msg, type) {
+    const el = document.getElementById('ttsStatus');
+    el.textContent = msg;
+    el.className = 'status ' + type;
+}
+
+async function synthesize() {
+    const text = document.getElementById('ttsText').value.trim();
+    if (!text) { setTtsStatus('Please enter some text', 'error'); return; }
+
+    const voice = document.getElementById('ttsVoice').value;
+    const speed = parseFloat(document.getElementById('ttsSpeed').value);
+    const btn = document.getElementById('ttsBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating...';
+    setTtsStatus('Generating speech...', 'processing');
+    document.getElementById('ttsAudio').style.display = 'none';
+    document.getElementById('ttsInfo').style.display = 'none';
+
+    try {
+        const r = await fetch('/v1/audio/speech', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'supertonic-3',
+                input: text,
+                voice: voice,
+                response_format: 'wav',
+                speed: speed,
+            }),
+        });
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({ detail: 'Server error' }));
+            throw new Error(err.detail || `HTTP ${r.status}`);
+        }
+
+        if (prevBlobUrl) { URL.revokeObjectURL(prevBlobUrl); }
+        const blob = await r.blob();
+        prevBlobUrl = URL.createObjectURL(blob);
+        const audio = document.getElementById('ttsAudio');
+        audio.src = prevBlobUrl;
+        audio.style.display = 'block';
+        audio.play().catch(() => {});
+
+        const procTime = r.headers.get('X-Processing-Time') || '?';
+        const size = (blob.size / 1024).toFixed(1);
+
+        // Build info bar safely
+        const infoEl = document.getElementById('ttsInfo');
+        infoEl.style.display = 'flex';
+        infoEl.innerHTML = '';
+        ['🔊 ' + voice, '📦 ' + size + ' KB', '⚡ ' + procTime + 's'].forEach(text => {
+            const span = document.createElement('span');
+            span.textContent = text;
+            infoEl.appendChild(span);
+        });
+
+        ttsHistory.unshift({ text, voice, time: new Date().toLocaleTimeString() });
+        if (ttsHistory.length > 10) ttsHistory.pop();
+        renderTtsHistory();
+        setTtsStatus('Speech generated!', 'success');
+    } catch (err) {
+        setTtsStatus('Error: ' + err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔊 Generate Speech';
+    }
+}
+
+function renderTtsHistory() {
+    const el = document.getElementById('ttsHistory');
+    el.innerHTML = '';
+    const h2 = document.createElement('h2');
+    h2.textContent = 'History';
+    el.appendChild(h2);
+
+    ttsHistory.forEach(h => {
+        const item = document.createElement('div');
+        item.className = 'history-item';
+
+        const textDiv = document.createElement('div');
+        textDiv.className = 'text';
+        textDiv.style.direction = isArabic(h.text) ? 'rtl' : 'ltr';
+        textDiv.textContent = h.text;
+
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'meta';
+        metaDiv.textContent = '🔊 ' + h.voice + ' · ' + h.time;
+
+        item.appendChild(textDiv);
+        item.appendChild(metaDiv);
+        el.appendChild(item);
+    });
+}
+</script>
+</body>
+</html>

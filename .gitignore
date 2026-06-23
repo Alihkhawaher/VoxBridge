@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+stt-env/
+
+# Models (large files, downloaded by setup.bat)
+whisper-ar-en/
+faster-whisper-large-v2-ar-codeswitching/
+*.bin
+*.onnx
+
+# Audio test files
+*.wav
+*.mp3
+*.ogg
+*.flac
+
+# Old/deprecated files
+.old/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Logs
+*.log
+
